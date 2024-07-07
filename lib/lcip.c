@@ -4,25 +4,40 @@
 
 #include "lcip.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 #define CRC16_HD4_POLY 0xBAAD
 #define CRC16_HD6_POLY 0xC86C
 
+uint8_t *tlv_blocks_to_bytes(const lcip_device_frame_t *device_frame) {
+    uint8_t *tlv_blocks_raw = malloc(device_frame->lenght);
+    if (tlv_blocks_raw) {
+        uint8_t *ptr = tlv_blocks_raw;
+        for (int i = 0; i < device_frame->tlv_block_count; i++) {
+            tlv_block_t current_frame = device_frame->tlv_blocks[i];
 
-/*tlv_block_t new_tlv_block(const uint16_t type, const uint8_t length, const uint8_t *value) {
-    tlv_block_t tlv;
-    tlv.type = type;
-    tlv.length = length;
-
-    tlv.value = malloc(length);
-    for (int i = 0; i < length; i++) {
-        tlv.value[i] = value[i];
+            *(uint16_t *) ptr = current_frame.type;
+            ptr += sizeof(current_frame.type);
+            *ptr = current_frame.length;
+            ptr += sizeof(current_frame.length);
+            for (int j = 0; j < current_frame.length; j++) {
+                ptr[j] = current_frame.value[j];
+            }
+            ptr += current_frame.length;
+        }
     }
+    return tlv_blocks_raw;
+}
 
-    return tlv;
-}*/
+uint32_t bytes_to_int(const uint8_t *buffer, const size_t length) {
+    uint32_t result = buffer[0];
+    for (size_t i = 0; i < length; ++i) {
+        result = result | (buffer[i] << (8 * i));
+    }
+    return result;
+}
 
-uint16_t _crc16(const uint8_t *data, const size_t size, const uint16_t poly) {
+uint16_t crc16(const uint8_t *data, const size_t size, const uint16_t poly) {
     uint16_t crc = 0xFFFF; // Initial value
 
     for (size_t i = 0; i < size; i++) {
@@ -41,7 +56,7 @@ uint16_t _crc16(const uint8_t *data, const size_t size, const uint16_t poly) {
 }
 
 // Function to verify data with the given checksum
-uint8_t verify_crc16(const uint8_t *data, const size_t size, const uint16_t received_crc, const uint16_t poly) {
+int8_t verify_crc16(const uint8_t *data, const size_t size, const uint16_t received_crc, const uint16_t poly) {
     // Create a buffer to hold data + received CRC
     uint8_t *buffer = malloc(size + sizeof(received_crc));
     if (!buffer) {
@@ -58,7 +73,7 @@ uint8_t verify_crc16(const uint8_t *data, const size_t size, const uint16_t rece
     buffer[size + 1] = received_crc & 0xFF;    // Low byte of CRC
 
     // Recalculate the CRC over the combined data (original data + received CRC)
-    const uint16_t calculated_crc = _crc16(buffer, size + 2, poly);
+    const uint16_t calculated_crc = crc16(buffer, size + 2, poly);
 
     // Free the buffer
     free(buffer);
@@ -67,137 +82,75 @@ uint8_t verify_crc16(const uint8_t *data, const size_t size, const uint16_t rece
     return calculated_crc == 0;
 }
 
-uint8_t verify_crc16_hd4(const uint8_t *data, const size_t size, const uint16_t received_crc) {
+int8_t verify_crc16_hd4(const uint8_t *data, const size_t size, const uint16_t received_crc) {
     return verify_crc16(data, size, received_crc, CRC16_HD4_POLY);
 }
 
-uint8_t verify_crc16_hd6(const uint8_t *data, const size_t size, const uint16_t received_crc) {
+int8_t verify_crc16_hd6(const uint8_t *data, const size_t size, const uint16_t received_crc) {
     return verify_crc16(data, size, received_crc, CRC16_HD6_POLY);
 }
 
-uint16_t _crc16_hd4(const uint8_t *data, const size_t size) {
-    return _crc16(data, size, CRC16_HD4_POLY);
+uint16_t crc16_hd4(const uint8_t *data, const size_t size) {
+    return crc16(data, size, CRC16_HD4_POLY);
 }
 
-uint16_t _crc16_hd6(const uint8_t *data, const size_t size) {
-    return _crc16(data, size, CRC16_HD6_POLY);
+uint16_t crc16_hd6(const uint8_t *data, const size_t size) {
+    return crc16(data, size, CRC16_HD6_POLY);
 }
 
-void _calculate_lcip_device_frame_crc(lcip_device_frame_t *device_frame) {
-    const uint8_t *header_raw = (uint16_t[]) {device_frame->destination, device_frame->ctrl_satus, device_frame->lenght};
-    device_frame->df_crc = _crc16_hd6(header_raw, sizeof(device_frame->destination) + sizeof(device_frame->ctrl_satus) + sizeof(device_frame->lenght));
-    device_frame->d_crc = _crc16_hd4(device_frame->tlv_frames, device_frame->lenght);
+void calculate_lcip_device_frame_crc(lcip_device_frame_t *device_frame) {
+    const uint8_t *header_raw = (uint8_t *)(uint16_t[]){device_frame->destination, device_frame->ctrl_satus, device_frame->lenght};
+    device_frame->df_crc = crc16_hd6(header_raw, sizeof(device_frame->destination) + sizeof(device_frame->ctrl_satus) + sizeof(device_frame->lenght));
+
+    uint8_t *tlv_blocks_raw = tlv_blocks_to_bytes(device_frame);
+
+    device_frame->d_crc = crc16_hd4(tlv_blocks_raw, device_frame->lenght);
+    free(tlv_blocks_raw);
 }
 
-lcip_device_frame_t new_lcip_device_frame(const uint16_t destionation, const uint16_t ctrl_status) {
+tlv_block_t new_tlv_block(const uint16_t type, const uint8_t length, uint8_t *value) {
+    tlv_block_t tlv;
+    tlv.type = type;
+    tlv.length = length;
+    tlv.value = value;
+
+    return tlv;
+}
+
+lcip_device_frame_t new_lcip_device_frame(const uint16_t destination, const uint16_t ctrl_status) {
     lcip_device_frame_t device_frame = {
-        .destination = destionation,
+        .destination = destination,
         .ctrl_satus = ctrl_status,
         .lenght = 0,
-        .tlv_frames = NULL,
+        .tlv_block_count = 0,
+        .tlv_blocks = NULL,
     };
-    _calculate_lcip_device_frame_crc(&device_frame);
+    calculate_lcip_device_frame_crc(&device_frame);
     return device_frame;
 }
 
-void lcip_device_frame_delete(const lcip_device_frame_t *device_frame) {
-    free(device_frame->tlv_frames);
+void lcip_device_frame_free(lcip_device_frame_t *device_frame) {
+    free(device_frame->tlv_blocks);
+    device_frame->lenght = 0;
+    device_frame->tlv_block_count = 0;
 }
 
-int lcip_device_frame_add_tlv(lcip_device_frame_t *device_frame, const uint16_t type, const uint8_t length, const uint8_t *value) {
-    const uint16_t new_len = device_frame->lenght + sizeof(type) + sizeof(length) + length;
-    uint8_t *temp = realloc(device_frame->tlv_frames, new_len);
-    if (temp) {
-        device_frame->tlv_frames = temp;
-        temp += device_frame->lenght;
-        device_frame->lenght = new_len;
+int8_t lcip_device_frame_add_tlv(lcip_device_frame_t *device_frame, const uint16_t type, const uint8_t length, uint8_t *value) {
+    size_t new_count = device_frame->tlv_block_count + 1;
+    tlv_block_t *temp = realloc(device_frame->tlv_blocks, sizeof(tlv_block_t) * new_count);
 
-        *(uint16_t *) temp = type;
-        temp += sizeof(type);
-        *temp = length;
-        temp += sizeof(length);
-        for (int i = 0; i < length; i++) {
-            temp[i] = value[i];
-        }
-        _calculate_lcip_device_frame_crc(device_frame);
+    if (temp) {
+        device_frame->tlv_blocks = temp;
+        tlv_block_t tlv_block = new_tlv_block(type, length, value);
+        device_frame->tlv_blocks[device_frame->tlv_block_count] = tlv_block;
+        device_frame->tlv_block_count = new_count;
+        device_frame->lenght += sizeof(type) + sizeof(length) + length;
+        calculate_lcip_device_frame_crc(device_frame);
         return 0;
     }
 
     return -1;
 }
-
-void tlv_block_delete(const tlv_block_t *tlv_block) {
-    free(tlv_block->value);
-}
-
-size_t lcip_device_frame_get_tlv(const lcip_device_frame_t *device_frame, const size_t offset, tlv_block_t *tlv_block) {
-    if (device_frame->lenght <= 0) return -1;
-
-    uint8_t *start = device_frame->tlv_frames + offset;
-    const uint16_t t = bytes_to_int(start, 2);
-    const uint8_t l = bytes_to_int(start += sizeof(tlv_block->type), 1);
-    tlv_block->type = t;
-    tlv_block->length = l;
-
-    tlv_block->value = malloc(l);
-    start += sizeof(tlv_block->length);
-    for (int i = 0; i < l; i++) {
-        tlv_block->value[i] = start[i];
-    }
-
-    return start+l - device_frame->tlv_frames;
-}
-
-/*uint16_t crc16_hd6_2(const uint8_t *data, size_t size) {
-    uint16_t out = 0;
-    int bits_read = 0, bit_flag;
-
-    /* Sanity check: #1#
-    if(data == NULL)
-        return 0;
-
-    while(size > 0)
-    {
-        bit_flag = out >> 15;
-
-        /* Get next bit: #1#
-        out <<= 1;
-        out |= (*data >> bits_read) & 1; // item a) work from the least significant bits
-
-        /* Increment bit counter: #1#
-        bits_read++;
-        if(bits_read > 7)
-        {
-            bits_read = 0;
-            data++;
-            size--;
-        }
-
-        /* Cycle check: #1#
-        if(bit_flag)
-            out ^= CRC16_HD6_POLY;
-
-    }
-
-    // "push out" the last 16 bits
-    int i;
-    for (i = 0; i < 16; ++i) {
-        bit_flag = out >> 15;
-        out <<= 1;
-        if(bit_flag)
-            out ^= CRC16_HD6_POLY;
-    }
-
-    // reverse the bits
-    uint16_t crc = 0;
-    i = 0x8000;
-    int j = 0x0001;
-    for (; i != 0; i >>=1, j <<= 1) {
-        if (i & out) crc |= j;
-    }
-
-    return crc;
-}*/
 
 uint8_t *serialize_uint8(uint8_t *buffer, const uint8_t value) {
     buffer[0] = value;
@@ -225,14 +178,6 @@ uint32_t tlv_block_get_value(const tlv_block_t *tlv_block) {
    return bytes_to_int(tlv_block->value, tlv_block->length);
 }
 
-uint32_t bytes_to_int(const uint8_t *buffer, const size_t length) {
-    uint32_t result = buffer[0];
-    for (size_t i = 0; i < length; ++i) {
-        result = result | (buffer[i] << (8 * i));
-    }
-    return result;
-}
-
 /*uint8_t *serialize_tlv_data(uint8_t *buffer, const uint8_t *value, const uint8_t len) {
     for (int i = 0; i < len; i++) {
         buffer[i] = value[i];
@@ -248,3 +193,50 @@ uint8_t *serialize_tlv_block(uint8_t *buffer, const tlv_block_t *tlv_block) {
 
     return buffer;
 }*/
+
+void print_lcip_device_frame_header_raw(const lcip_device_frame_t *device_frame) {
+    const uint8_t *header = (uint8_t *)(uint16_t[]){device_frame->destination, device_frame->ctrl_satus, device_frame->lenght};
+    const size_t header_size = sizeof(device_frame->destination) + sizeof(device_frame->ctrl_satus) + sizeof(device_frame->lenght);
+    printf("Header Raw:\n\t");
+    for (int i = 0; i < header_size; i++) {
+        printf("0x%02X ", *(header + i));
+    }
+    printf("\n\tdfCRC: 0x%04X\n", device_frame->df_crc);
+    printf("\tdfCRC check %s!\n", verify_crc16_hd6(header, header_size, device_frame->df_crc) ? "succesful" : "failed");
+}
+
+void print_lcip_device_frame_tlvs_raw(const lcip_device_frame_t *device_frame) {
+    uint8_t *tlv_blocks_raw = tlv_blocks_to_bytes(device_frame);
+    printf("Frame TLVs Raw:\n\t");
+    if (!device_frame->lenght) printf("<EMPTY>");
+    else {
+
+        for (int i = 0; i < device_frame->lenght; i++) {
+            printf("0x%02X ", tlv_blocks_raw[i]);
+        }
+    }
+    printf("\n\tdCRC: 0x%04X\n", device_frame->d_crc);
+    printf("\tdCRC check %s!\n", verify_crc16_hd4(tlv_blocks_raw, device_frame->lenght, device_frame->d_crc) ? "succesful" : "failed");
+    free(tlv_blocks_raw);
+}
+
+void print_lcip_device_frame_tlvs(const lcip_device_frame_t *device_frame) {
+    printf("Frame TLVs:\n");
+    if (!device_frame->tlv_block_count) {
+        puts("\t<EMPTY>");
+    } else {
+        for (int i = 0; i < device_frame->tlv_block_count; i++) {
+            tlv_block_t current = device_frame->tlv_blocks[i];
+            printf("\tT: 0x%04X; L: %d; V: 0x%04X\n", current.type, current.length, tlv_block_get_value(&current));
+        }
+    }
+}
+
+void print_lcip_device_frame(const lcip_device_frame_t *device_frame) {
+    puts("Header Data:");
+    printf("\tDestination: 0x%04X, CTRL_STATUS: 0x%04X, Length: %d\n", device_frame->destination, device_frame->ctrl_satus, device_frame->lenght);
+    print_lcip_device_frame_header_raw(device_frame);
+    print_lcip_device_frame_tlvs(device_frame);
+    print_lcip_device_frame_tlvs_raw(device_frame);
+    puts("");
+}

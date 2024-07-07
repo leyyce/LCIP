@@ -36,7 +36,8 @@ struct lcip_device_frame {
     uint16_t ctrl_satus;
     uint16_t lenght;
     uint16_t df_crc;
-    uint8_t *tlv_frames;
+    size_t tlv_block_count;
+    tlv_block_t *tlv_blocks;
     uint16_t d_crc;
 };
 
@@ -46,17 +47,17 @@ struct tlv_block {
     uint8_t *value;
 };
 
-// tlv_block_t new_tlv_block(uint16_t type, uint8_t length, uint8_t *value);
+tlv_block_t new_tlv_block(const uint16_t type,const  uint8_t length, uint8_t *value);
 uint32_t tlv_block_get_value(const tlv_block_t *tlv_block);
-void tlv_block_delete(const tlv_block_t *tlv_block);
 
-uint8_t verify_crc16_hd4(const uint8_t *data, const size_t size, const uint16_t received_crc);
-uint8_t verify_crc16_hd6(const uint8_t *data, const size_t size, const uint16_t received_crc);
+int8_t verify_crc16_hd4(const uint8_t *data, const size_t size, const uint16_t received_crc);
+int8_t verify_crc16_hd6(const uint8_t *data, const size_t size, const uint16_t received_crc);
 
-lcip_device_frame_t new_lcip_device_frame(const uint16_t destionation, const uint16_t ctrl_status);
-void lcip_device_frame_delete(const lcip_device_frame_t *device_frame);
-int lcip_device_frame_add_tlv(lcip_device_frame_t *device_frame, const uint16_t type, const uint8_t length, const uint8_t *value);
-size_t lcip_device_frame_get_tlv(const lcip_device_frame_t *device_frame, const size_t offset, tlv_block_t *tlv_block);
+lcip_device_frame_t new_lcip_device_frame(const uint16_t destination, const uint16_t ctrl_status);
+void lcip_device_frame_free(lcip_device_frame_t *device_frame);
+int8_t lcip_device_frame_add_tlv(lcip_device_frame_t *device_frame, const uint16_t type, const uint8_t length, uint8_t *value);
+// size_t lcip_device_frame_get_tlv(const lcip_device_frame_t *device_frame, const size_t offset, tlv_block_t *tlv_block);
+void print_lcip_device_frame(const lcip_device_frame_t *device_frame);
 
 uint8_t *serialize_uint8(uint8_t *buffer, uint8_t value);
 uint8_t *serialize_uint16(uint8_t *buffer, uint16_t value);
