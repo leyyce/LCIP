@@ -8,15 +8,19 @@
 #define CRC16_HD4_POLY 0xBAAD
 #define CRC16_HD6_POLY 0xC86C
 
-/*
-tlv_block_t new_tlv_block(const uint16_t type, const uint8_t length, uint8_t *value) {
-    return tlv_block_t {
-        .type = type,
-        .length = length,
-        .value = value
-    };
-}
-*/
+
+/*tlv_block_t new_tlv_block(const uint16_t type, const uint8_t length, const uint8_t *value) {
+    tlv_block_t tlv;
+    tlv.type = type;
+    tlv.length = length;
+
+    tlv.value = malloc(length);
+    for (int i = 0; i < length; i++) {
+        tlv.value[i] = value[i];
+    }
+
+    return tlv;
+}*/
 
 uint16_t _crc16(const uint8_t *data, const size_t size, const uint16_t poly) {
     uint16_t crc = 0xFFFF; // Initial value
@@ -108,7 +112,7 @@ int lcip_device_frame_add_tlv(lcip_device_frame_t *device_frame, const uint16_t 
         temp += device_frame->lenght;
         device_frame->lenght = new_len;
 
-        *temp = type;
+        *(uint16_t *) temp = type;
         temp += sizeof(type);
         *temp = length;
         temp += sizeof(length);
@@ -120,6 +124,28 @@ int lcip_device_frame_add_tlv(lcip_device_frame_t *device_frame, const uint16_t 
     }
 
     return -1;
+}
+
+void tlv_block_delete(const tlv_block_t *tlv_block) {
+    free(tlv_block->value);
+}
+
+size_t lcip_device_frame_get_tlv(const lcip_device_frame_t *device_frame, const size_t offset, tlv_block_t *tlv_block) {
+    if (device_frame->lenght <= 0) return -1;
+
+    uint8_t *start = device_frame->tlv_frames + offset;
+    const uint16_t t = bytes_to_int(start, 2);
+    const uint8_t l = bytes_to_int(start += sizeof(tlv_block->type), 1);
+    tlv_block->type = t;
+    tlv_block->length = l;
+
+    tlv_block->value = malloc(l);
+    start += sizeof(tlv_block->length);
+    for (int i = 0; i < l; i++) {
+        tlv_block->value[i] = start[i];
+    }
+
+    return start+l - device_frame->tlv_frames;
 }
 
 /*uint16_t crc16_hd6_2(const uint8_t *data, size_t size) {
@@ -193,6 +219,10 @@ uint8_t *serialize_uint32(uint8_t *buffer, const uint32_t value) {
     buffer[3] = value;
 
     return buffer + 4;
+}
+
+uint32_t tlv_block_get_value(const tlv_block_t *tlv_block) {
+   return bytes_to_int(tlv_block->value, tlv_block->length);
 }
 
 uint32_t bytes_to_int(const uint8_t *buffer, const size_t length) {
